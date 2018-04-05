@@ -1,5 +1,6 @@
 package com.sumaqideas.gdrivechanges
 
+import android.app.Activity
 import android.content.Context
 import android.os.AsyncTask
 import android.widget.Toast
@@ -25,8 +26,7 @@ public class FileListFetch : AsyncTask<GoogleAccountCredential, Int, List<File>>
 
 }
 
-public class MakeRequestTask(val credential: GoogleAccountCredential, val context: Context) : AsyncTask<Void, Void, List<String>>() {
-    private lateinit var callback: MakeRequestTask.Callback
+public class MakeRequestTask(val credential: GoogleAccountCredential, val activity: Activity, val callback: MakeRequestTask.Callback) : AsyncTask<Void, Void, List<String>>() {
     private var lastError: Exception? = null
     private var transport: HttpTransport = AndroidHttp.newCompatibleTransport()
     private var jsonFactory = JacksonFactory.getDefaultInstance()
@@ -69,15 +69,17 @@ public class MakeRequestTask(val credential: GoogleAccountCredential, val contex
 
     override fun onPostExecute(result: List<String>?) {
         if (result == null || result.size == 0) {
-            Toast.makeText(context, "Error", Toast.LENGTH_LONG).show()
+            Toast.makeText(activity, "Error", Toast.LENGTH_LONG).show()
+            return
         }
+        callback.onTaskFinished(result)
     }
 
     override fun onCancelled(result: List<String>?) {
         if (lastError != null) {
             callback.onTaskFailed(lastError as Exception)
         } else {
-            Toast.makeText(context, "Request cancelled", Toast.LENGTH_LONG).show()
+            Toast.makeText(activity, "Request cancelled", Toast.LENGTH_LONG).show()
         }
     }
 }
