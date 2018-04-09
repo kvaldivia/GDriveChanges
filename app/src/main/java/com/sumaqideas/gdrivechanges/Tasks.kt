@@ -3,30 +3,67 @@ package com.sumaqideas.gdrivechanges
 import android.app.Activity
 import android.content.Context
 import android.os.AsyncTask
+import android.util.Log
 import android.widget.Toast
 import com.google.api.client.extensions.android.http.AndroidHttp
 import com.google.api.client.googleapis.extensions.android.gms.auth.GoogleAccountCredential
 import com.google.api.client.googleapis.extensions.android.gms.auth.GooglePlayServicesAvailabilityIOException
 import com.google.api.client.http.HttpTransport
 import com.google.api.client.json.jackson2.JacksonFactory
-import com.google.api.services.drive.model.File
-import com.google.api.services.drive.model.FileList
+import com.google.api.services.drive.model.*
 
 
 public object TasksCoordinator {
 
 }
 
-public class FileListFetch : AsyncTask<GoogleAccountCredential, Int, List<File>>() {
-    private lateinit var service: com.google.api.services.drive.Drive
-    override fun doInBackground(vararg params: GoogleAccountCredential?): List<File> {
+public class WatchFile(
+        val credential: GoogleAccountCredential, val activity: Activity
+        , val callback: MakeRequestTask.Callback)
+    : AsyncTask<GoogleAccountCredential, Int, ChangeList>() {
+
+    public lateinit var onFileChangeListener: WatchFile.OnFileChangeListener
+
+    public interface OnFileChangeListener {
+        public fun update(change: Change)
+    }
+
+    override fun onPreExecute() {
+        super.onPreExecute()
+        if (onFileChangeListener == null)
+            throw ExceptionInInitializerError("There must be a OnFileChangeListener")
+    }
+
+    private lateinit var savedStartPageToken: String
+    private var lastError: Exception? = null
+    private var transport: HttpTransport = AndroidHttp.newCompatibleTransport()
+    private var jsonFactory = JacksonFactory.getDefaultInstance()
+    private var service = com.google.api.services.drive.Drive.Builder(
+            transport, jsonFactory, credential
+    ).setApplicationName("GDrive Changes").build()
+    override fun doInBackground(vararg params: GoogleAccountCredential?): ChangeList? {
         val credential = params[0] as GoogleAccountCredential
-        return emptyList()
+        val pageToken = StartPageToken().startPageToken;
+        var changes: ChangeList? = null
+
+        while (pageToken != null) {
+            changes = service.changes().list(pageToken).execute()
+            for (change: Change in changes.changes) {
+                onFileChangeListener.update(change)
+            }
+        }
+
+        if (changes?.newStartPageToken != null)
+            savedStartPageToken = changes.newStartPageToken
+
+        return changes
     }
 
 }
 
-public class MakeRequestTask(val credential: GoogleAccountCredential, val activity: Activity, val callback: MakeRequestTask.Callback) : AsyncTask<Void, Void, List<String>>() {
+public class MakeRequestTask(
+        val credential: GoogleAccountCredential, val activity: Activity
+        , val callback: MakeRequestTask.Callback) : AsyncTask<Void, Void, List<File>>() {
     private var lastError: Exception? = null
     private var transport: HttpTransport = AndroidHttp.newCompatibleTransport()
     private var jsonFactory = JacksonFactory.getDefaultInstance()
@@ -36,11 +73,11 @@ public class MakeRequestTask(val credential: GoogleAccountCredential, val activi
 
     public interface Callback {
         public fun onTaskStarted()
-        public fun onTaskFinished(results: List<String>)
+        public fun onTaskFinished(results: List<File>)
         public fun onTaskFailed(error: Exception)
     }
 
-    override fun doInBackground(vararg params: Void?): List<String>? {
+    override fun doInBackground(vararg params: Void?): List<File>? {
         try {
             return getDataFromApi()
         } catch (e: Exception) {
@@ -50,32 +87,27 @@ public class MakeRequestTask(val credential: GoogleAccountCredential, val activi
         }
     }
 
-    public fun getDataFromApi() : List<String> {
+    public fun getDataFromApi() : List<File> {
         var fileInfo = ArrayList<String>()
         var result: FileList = service.files().list().setPageSize(10)
                 .setFields("nextPageToken, files(id, name)").execute()
-        var files: List<File> = result.files
-
-        if (files != null) {
-            for (file: File in files) {
-                fileInfo.add(String.format("%s (%s)\n", file.name, file.id))
-            }
-        }
-        return fileInfo
+        return result.files
     }
 
     override fun onPreExecute() {
+        Log.d("MakeRequestTask", "task started")
     }
 
-    override fun onPostExecute(result: List<String>?) {
+    override fun onPostExecute(result: List<File>?) {
         if (result == null || result.size == 0) {
             Toast.makeText(activity, "Error", Toast.LENGTH_LONG).show()
             return
         }
+        Log.d("MakeRequestTask", "task finished")
         callback.onTaskFinished(result)
     }
 
-    override fun onCancelled(result: List<String>?) {
+    override fun onCancelled(result: List<File>?) {
         if (lastError != null) {
             callback.onTaskFailed(lastError as Exception)
         } else {
